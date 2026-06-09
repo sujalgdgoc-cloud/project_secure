@@ -46,6 +46,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '98540195832',
     projectId: 'muletrace-7993b',
     authDomain: 'muletrace-7993b.firebaseapp.com',
+    databaseURL: 'https://muletrace-7993b-default-rtdb.firebaseio.com',
     storageBucket: 'muletrace-7993b.firebasestorage.app',
     measurementId: 'G-S5WS3DBV4V',
   );
@@ -55,6 +56,7 @@ class DefaultFirebaseOptions {
     appId: '1:98540195832:android:f2cff180dd9cc2776bd00d',
     messagingSenderId: '98540195832',
     projectId: 'muletrace-7993b',
+    databaseURL: 'https://muletrace-7993b-default-rtdb.firebaseio.com',
     storageBucket: 'muletrace-7993b.firebasestorage.app',
   );
 
@@ -63,6 +65,7 @@ class DefaultFirebaseOptions {
     appId: '1:98540195832:ios:b033235fbe4a97086bd00d',
     messagingSenderId: '98540195832',
     projectId: 'muletrace-7993b',
+    databaseURL: 'https://muletrace-7993b-default-rtdb.firebaseio.com',
     storageBucket: 'muletrace-7993b.firebasestorage.app',
     iosBundleId: 'com.example.projectSecure',
   );
@@ -72,6 +75,7 @@ class DefaultFirebaseOptions {
     appId: '1:98540195832:ios:b033235fbe4a97086bd00d',
     messagingSenderId: '98540195832',
     projectId: 'muletrace-7993b',
+    databaseURL: 'https://muletrace-7993b-default-rtdb.firebaseio.com',
     storageBucket: 'muletrace-7993b.firebasestorage.app',
     iosBundleId: 'com.example.projectSecure',
   );
@@ -82,6 +86,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '98540195832',
     projectId: 'muletrace-7993b',
     authDomain: 'muletrace-7993b.firebaseapp.com',
+    databaseURL: 'https://muletrace-7993b-default-rtdb.firebaseio.com',
     storageBucket: 'muletrace-7993b.firebasestorage.app',
     measurementId: 'G-JKK715318J',
   );
