@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
+import 'package:project_secure/screens/aiModelScreen.dart';
 import 'package:project_secure/screens/alertScreen.dart';
 import 'package:project_secure/screens/homepage.dart';
 import 'package:project_secure/screens/transcationScreen.dart';
@@ -27,6 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
     Homepage(),
     AlertScreen(),
     TranscationScreen(),
+    AiModelScreen(),
   ];
   @override
   Widget build(BuildContext context) {
@@ -71,6 +73,13 @@ class _LoginScreenState extends State<LoginScreen> {
                 icon: Icon(Icons.receipt, color: Colors.white),
                 label: Text(
                   'Transactions',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+              NavigationRailDestination(
+                icon: Icon(Icons.model_training_rounded, color: Colors.white),
+                label: Text(
+                  'AI Model',
                   style: TextStyle(color: Colors.white),
                 ),
               ),
