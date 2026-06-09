@@ -23,6 +23,7 @@ class _AlertScreenState extends State<AlertScreen> {
       body: SingleChildScrollView(
         child: Column(
           children: [
+            //custom app bar
             Padding(
               padding: const EdgeInsets.all(4.0),
               child: Container(

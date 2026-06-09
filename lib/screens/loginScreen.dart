@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:project_secure/screens/alertScreen.dart';
 import 'package:project_secure/screens/homepage.dart';
+import 'package:project_secure/screens/transcationScreen.dart';
 import 'package:project_secure/widgets/info_card.dart';
 
 import '../widgets/alert_card.dart';
@@ -24,7 +25,8 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _extended = false;
   List<Widget> _pages = [
     Homepage(),
-    AlertScreen()
+    AlertScreen(),
+    TranscationScreen(),
   ];
   @override
   Widget build(BuildContext context) {
