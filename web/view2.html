@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: sans-serif; background: #1a1a1a; color: white; margin: 20px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+    .card { background: #2d2d2d; padding: 10px; border-radius: 8px; text-align: center; }
+    img { max-width: 100%; border-radius: 4px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>All Uploaded Mockups</h1>
+  <div class="grid">
+    <script>
+      for (let i = 1; i <= 26; i++) {
+        document.write(`
+          <div class="card">
+            <h3>img${i}.png</h3>
+            <img src="img${i}.png" alt="img${i}.png">
+          </div>
+        `);
+      }
+    </script>
+  </div>
+</body>
+</html>

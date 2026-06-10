@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:project_secure/services/ai_model_service.dart';
+import 'package:project_secure/services/db_service.dart';
+import 'package:project_secure/services/location_service.dart';
 
 // ─── Feature descriptor ───────────────────────────────────────────────────
 class _Feature {
@@ -43,6 +45,7 @@ class _AiModelScreenState extends State<AiModelScreen> {
   // Account fields
   final _accountFromCtrl = TextEditingController();
   final _accountToCtrl = TextEditingController();
+  final _amountCtrl = TextEditingController(text: '10000');
 
   // Feature controllers
   late final List<TextEditingController> _ctrls = _features
@@ -52,18 +55,15 @@ class _AiModelScreenState extends State<AiModelScreen> {
   bool _submitting = false;
   bool _submitted = false;
   String? _error;
-  String _step = '';              // tracks current step for UI feedback
-  Map<String, dynamic>? _aiResult; // stores AI response to show in UI
+  String _step = '';
+  Map<String, dynamic>? _aiResult;
   StreamSubscription<DatabaseEvent>? _activeTxnSub;
-
-  final _txnRef = FirebaseDatabase.instance.ref('transactions');
-  final _accRef = FirebaseDatabase.instance.ref('accounts');
-  final _muleRef = FirebaseDatabase.instance.ref('transactions/mule-response');
 
   @override
   void dispose() {
     _accountFromCtrl.dispose();
     _accountToCtrl.dispose();
+    _amountCtrl.dispose();
     for (final c in _ctrls) { c.dispose(); }
     _activeTxnSub?.cancel();
     super.dispose();
@@ -90,6 +90,7 @@ class _AiModelScreenState extends State<AiModelScreen> {
   Future<void> _submitToFirebase() async {
     final from = _accountFromCtrl.text.trim();
     final to   = _accountToCtrl.text.trim();
+    final amount = double.tryParse(_amountCtrl.text.trim()) ?? 10000.0;
 
     if (from.isEmpty || to.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -117,145 +118,151 @@ class _AiModelScreenState extends State<AiModelScreen> {
     });
 
     try {
-      final now      = DateTime.now().toIso8601String();
-      final features = _featuresMap;
-      final amount   = features['F3799'] ?? 0;
+      // ── STEP 0: Fetch transaction location ─────────────────────────
+      setState(() => _step = 'Capturing transaction location…');
+      final location = await LocationService.getTransactionLocation();
 
-      // ── STEP 1: Push transaction with status pending ──────────────
-      final newTxnRef = _txnRef.push();
-      final txnId = newTxnRef.key!;
+      // ── STEP 1: Write transaction node with location ─────────────
+      final txnId = await DbService.writeTxn(
+        accountFrom: from,
+        accountTo: to,
+        amount: amount,
+        location: location,
+      );
 
-      await newTxnRef.set({
-        'accountFrom': from,
-        'accountTo':   to,
-        'amount':      amount,
-        'features':    features,
-        'timestamp':   now,
-        'status':      'pending',
-        'mule':        false,
-        'risk_tier':   'PENDING',
-        'mule_probability': 0.0,
-      });
+      // ── STEP 2: Write boolean account references + summary ───────
+      await DbService.writeAccRefs(
+        from: from, to: to, txnId: txnId,
+        amount: amount, isMule: false);
 
-      // ── STEP 2: Write account folders ────────────────────────────
-      await _accRef.child('$from/sent/$txnId').set(
-          {'to': to, 'amount': amount, 'timestamp': now, 'txnId': txnId});
-      await _accRef.child('$to/received/$txnId').set(
-          {'from': from, 'amount': amount, 'timestamp': now, 'txnId': txnId});
-
-      // ── STEP 3: Setup active transaction listener to update UI ─────
+      // ── STEP 3: Listen to this transaction for status updates ───
       await _activeTxnSub?.cancel();
-      _activeTxnSub = newTxnRef.onValue.listen((event) {
+      final txnRef = DbService.transactions.child(txnId);
+      _activeTxnSub = txnRef.onValue.listen((event) {
         final val = event.snapshot.value;
         if (val == null || !mounted) return;
 
-        final data = AiModelService.toStringMap(val);
+        final data   = AiModelService.toStringMap(val);
         final status = data['status']?.toString() ?? 'pending';
 
-        setState(() {
-          if (status == 'pending') {
-            _step = 'Transaction submitted (Pending analysis)…';
-          } else if (status == 'analyzing') {
-            _step = 'Analyzing transaction using AI model…';
-          } else if (status == 'analyzed') {
-            final isMule = data['mule'] == true;
-            _step = isMule ? '🚨 MULE DETECTED' : '✅ Transaction Cleared';
-            _submitted = true;
-            _aiResult = {
-              'flagged': isMule,
-              'risk_tier': data['risk_tier'],
-              'mule_probability': data['mule_probability'],
-              'signals_triggered': data['signals_triggered'],
-              'signals': data['signals'] ?? [],
-            };
-          } else if (status == 'analysis_failed') {
+        if (status == 'pending') {
+          setState(() => _step = 'Transaction submitted — pending AI analysis…');
+        } else if (status == 'analyzing') {
+          setState(() => _step = 'AI model is analyzing the transaction…');
+        } else if (status == 'analyzed') {
+          // One-shot read of the predictions node
+          DbService.predictions.child(txnId).get().then((predSnap) {
+            if (!mounted) return;
+            final pred = predSnap.exists
+                ? AiModelService.toStringMap(predSnap.value)
+                : <String, dynamic>{};
+            final prob   = (pred['probability'] as num?)?.toDouble() ?? 0.0;
+            final isMule = prob >= DbService.defaultThreshold;
+            setState(() {
+              _submitted = true;
+              _step      = isMule ? '🚨 MULE DETECTED' : '✅ Transaction Cleared';
+              _aiResult  = {
+                'flagged':           isMule,
+                'risk_tier':         pred['riskTier'],
+                'mule_probability':  prob,
+                'signals_triggered': pred['signalsTriggered'],
+                'signals':           pred['signals'] ?? [],
+              };
+            });
+          });
+        } else if (status == 'analysis_failed') {
+          setState(() {
             _error = 'AI model analysis failed.';
-            _step = 'Analysis failed';
-          }
-        });
+            _step  = 'Analysis failed';
+          });
+        }
       });
 
-      // ── STEP 4: Trigger background analysis (Non-blocking / Unawaited) ─
-      _runBackgroundAnalysis(txnId, features, from, to, amount, now);
+      // ── STEP 4: Kick off background analysis (non-blocking) ──────
+      _runBackgroundAnalysis(txnId, _featuresMap);
 
       if (!mounted) return;
-      setState(() {
-        _submitting = false;
-        _submitted  = true;
-      });
+      setState(() { _submitting = false; _submitted = true; });
 
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _submitting = false;
-      });
+      setState(() { _error = e.toString(); _submitting = false; });
     }
   }
 
   void _runBackgroundAnalysis(
-      String txnId,
-      Map<String, dynamic> features,
-      String from,
-      String to,
-      dynamic amount,
-      String timestamp) async {
-    final txnRef = _txnRef.child(txnId);
-
+      String txnId, Map<String, dynamic> features) async {
     try {
-      // Transition 1: Set status to analyzing in the database
-      await txnRef.update({'status': 'analyzing'});
+      // Transition 1 → analyzing
+      await DbService.markTxnStatus(txnId, 'analyzing');
 
-      // Call AI model
-      final result = await AiModelService.predict(features);
+      Map<String, dynamic>? result;
+      const int maxAttempts = 5;
+
+      print('Transaction ID: $txnId\n');
+
+      for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+        print('Attempt $attempt/$maxAttempts\n');
+        print('Calling AI Prediction API...\n');
+
+        try {
+          result = await AiModelService.predict(features);
+          if (result != null) {
+            print('Prediction successful.\nUpdating Firebase...\n');
+            break;
+          }
+        } catch (e) {
+          print('AI prediction attempt $attempt failed with exception: $e');
+        }
+
+        if (result == null) {
+          if (attempt < maxAttempts) {
+            print('AI request failed.\n');
+            print('Waiting 15 seconds before retry...\n');
+            await Future.delayed(const Duration(seconds: 15));
+          } else {
+            print('Attempt $maxAttempts/$maxAttempts failed.\n');
+            print('Maximum retry limit reached.\n');
+            print('Updating status to analysis_failed.\n');
+          }
+        }
+      }
 
       if (result == null) {
-        // Transition 2 (fail): Set status to analysis_failed in the database
-        await txnRef.update({'status': 'analysis_failed'});
+        await DbService.markTxnStatus(txnId, 'analysis_failed');
         return;
       }
 
-      // Transition 2 (success): Set status to analyzed and update result in the database
-      final isMule = result['flagged'] == true;
-      final riskTier = result['risk_tier']?.toString() ?? 'UNKNOWN';
-      final mulePct = (result['mule_probability'] as num?)?.toDouble() ?? 0.0;
+      final isMule  = result['flagged'] == true;
+      final prob    = (result['mule_probability'] as num?)?.toDouble() ?? 0.0;
+      final tier    = result['risk_tier']?.toString() ?? 'UNKNOWN';
+      final sigCt   = (result['signals_triggered'] as num?)?.toInt() ?? 0;
+      final signals = List<dynamic>.from(result['signals'] ?? []);
 
-      await txnRef.update({
-        'status':           'analyzed',
-        'mule':             isMule,
-        'risk_tier':        riskTier,
-        'mule_probability': mulePct,
-        'signals_triggered': result['signals_triggered'] ?? 0,
-        'signals':          result['signals'] ?? [],
-        'ai_analyzed_at':   DateTime.now().toIso8601String(),
-      });
+      // Transition 2 → write prediction node
+      await DbService.writePrediction(
+        txnId: txnId, probability: prob, riskTier: tier,
+        signalsTriggered: sigCt, signals: signals);
 
-      // Write to transactions/mule-response if it is a mule
+      // Transition 3 → mark analyzed on transaction node
+      await DbService.markTxnStatus(txnId, 'analyzed');
+
+      // Transition 4 → write alert if mule
       if (isMule) {
-        await _muleRef.child(txnId).set({
-          'txnId':            txnId,
-          'accountFrom':      from,
-          'accountTo':        to,
-          'amount':           amount,
-          'mule_probability': mulePct,
-          'risk_tier':        riskTier,
-          'flagged':          true,
-          'signals':          result['signals'] ?? [],
-          'proofs':           result['proofs']  ?? [],
-          'signals_triggered': result['signals_triggered'] ?? 0,
-          'analyzed_at':      DateTime.now().toIso8601String(),
-        });
+        await DbService.writeAlert(
+          txnId: txnId, probability: prob,
+          riskTier: tier, signals: signals);
       }
     } catch (e) {
-      try {
-        await txnRef.update({'status': 'analysis_failed'});
-      } catch (_) {}
+      print('Background worker failed: $e');
+      try { await DbService.markTxnStatus(txnId, 'analysis_failed'); } catch (_) {}
     }
   }
 
   void _resetFields() {
     _accountFromCtrl.clear();
     _accountToCtrl.clear();
+    _amountCtrl.text = '10000';
     for (var i = 0; i < _features.length; i++) {
       _ctrls[i].text = _features[i].defaultValue.toString();
     }
@@ -480,6 +487,13 @@ class _AiModelScreenState extends State<AiModelScreen> {
                                         label: 'Account To (Receiver ID)',
                                         hint: 'e.g. ACC002',
                                         icon: Icons.send_outlined,
+                                      )),
+                                      const SizedBox(width: 12),
+                                      Expanded(child: _accountField(
+                                        controller: _amountCtrl,
+                                        label: 'Amount (INR)',
+                                        hint: 'e.g. 25000',
+                                        icon: Icons.currency_rupee,
                                       )),
                                     ]),
                                     const SizedBox(height: 16),

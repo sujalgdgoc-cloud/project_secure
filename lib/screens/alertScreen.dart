@@ -1,231 +1,514 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:project_secure/screens/alertinfoScreen.dart';
 import 'package:project_secure/widgets/ai_sum_feed.dart';
 import 'package:project_secure/widgets/realtimeAlertcard.dart';
+import 'package:project_secure/services/db_service.dart';
 
 class AlertScreen extends StatefulWidget {
-  const AlertScreen({super.key});
+  final ValueChanged<String>? onViewTxn;
+  const AlertScreen({super.key, this.onViewTxn});
 
   @override
   State<AlertScreen> createState() => _AlertScreenState();
 }
 
 class _AlertScreenState extends State<AlertScreen> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+
+  Map<String, dynamic> _safe(dynamic val) {
+    if (val is Map) return Map<String, dynamic>.from(val);
+    return <String, dynamic>{};
+  }
+
+  String _getDuration(dynamic createdAt) {
+    if (createdAt == null) return 'unknown';
+    final int ts = createdAt is int
+        ? createdAt
+        : (int.tryParse(createdAt.toString()) ?? 0);
+    if (ts == 0) return 'unknown';
+
+    final diff = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ts));
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    Color h1 = Colors.black;
-    Color h2 = Colors.black45;
-    Color text = Colors.black;
-    Color bgColor = Colors.white70;
-    Color buttonColor = Colors.blue;
+    const Color text = Color(0xFF0F172A);
+    const Color bgColor = Color(0xFFF1F5F9);
+
     return Scaffold(
       backgroundColor: bgColor,
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            //custom app bar
-            Padding(
-              padding: const EdgeInsets.all(4.0),
-              child: Container(
-                decoration: BoxDecoration(
-                  border: Border(bottom: BorderSide(color: Color(0xFFcacfd6))),
-                ),
-                height: MediaQuery.of(context).size.height * 0.09,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    Column(
+      body: StreamBuilder<DatabaseEvent>(
+        stream: DbService.transactions.onValue,
+        builder: (context, txnSnap) {
+          return StreamBuilder<DatabaseEvent>(
+            stream: DbService.predictions.onValue,
+            builder: (context, predSnap) {
+              return StreamBuilder<DatabaseEvent>(
+                stream: DbService.alerts.onValue,
+                builder: (context, alertSnap) {
+                  // ── Parse Transactions ──────────────────────────────
+                  Map<String, Map<String, dynamic>> txnMap = {};
+                  if (txnSnap.hasData && txnSnap.data!.snapshot.value != null) {
+                    final raw = txnSnap.data!.snapshot.value;
+                    if (raw is Map) {
+                      txnMap = Map.fromEntries(raw.entries
+                          .where((e) => e.key.toString() != 'mule-response')
+                          .map((e) => MapEntry(e.key.toString(), _safe(e.value))));
+                    }
+                  }
+
+                  // ── Parse Predictions ───────────────────────────────
+                  Map<String, Map<String, dynamic>> predMap = {};
+                  if (predSnap.hasData && predSnap.data!.snapshot.value != null) {
+                    final raw = predSnap.data!.snapshot.value;
+                    if (raw is Map) {
+                      predMap = raw.map((k, v) => MapEntry(k.toString(), _safe(v)));
+                    }
+                  }
+
+                  // ── Parse Alerts ────────────────────────────────────
+                  Map<String, Map<String, dynamic>> alertMap = {};
+                  if (alertSnap.hasData && alertSnap.data!.snapshot.value != null) {
+                    final raw = alertSnap.data!.snapshot.value;
+                    if (raw is Map) {
+                      alertMap = raw.map((k, v) => MapEntry(k.toString(), _safe(v)));
+                    }
+                  }
+
+                  // ── Top Row Dynamic Metrics ────────────────────────
+                  final criticalAlertsCount = alertMap.length;
+                  final inProgressCount = txnMap.values.where((t) {
+                    final s = (t['status'] ?? '').toString();
+                    return s == 'pending' || s == 'analyzing';
+                  }).length;
+                  final escalatedCount = txnMap.values.where((t) {
+                    final s = (t['status'] ?? '').toString();
+                    return s == 'escalated' || s == 'held';
+                  }).length;
+
+                  // ── Process Alerts List ─────────────────────────────
+                  final List<MapEntry<String, Map<String, dynamic>>> alertEntries = alertMap.entries.toList();
+                  
+                  // Sort by analyzedAt descending
+                  alertEntries.sort((a, b) {
+                    final aTs = a.value['analyzedAt'] ?? 0;
+                    final bTs = b.value['analyzedAt'] ?? 0;
+                    return bTs.compareTo(aTs);
+                  });
+
+                  // Filter by Search Query
+                  final filteredAlerts = alertEntries.where((entry) {
+                    if (_searchQuery.isEmpty) return true;
+                    final query = _searchQuery.toLowerCase();
+                    final txnId = entry.key.toLowerCase();
+                    final alertData = entry.value;
+                    final txnData = txnMap[entry.key] ?? {};
+                    
+                    final from = (txnData['accountFrom'] ?? '').toString().toLowerCase();
+                    final to = (txnData['accountTo'] ?? '').toString().toLowerCase();
+                    final riskTier = (alertData['riskTier'] ?? '').toString().toLowerCase();
+                    
+                    final List<dynamic> signals = alertData['signals'] is List ? alertData['signals'] as List : [];
+                    final signalsText = signals.join(" ").toLowerCase();
+
+                    return txnId.contains(query) ||
+                        from.contains(query) ||
+                        to.contains(query) ||
+                        riskTier.contains(query) ||
+                        signalsText.contains(query);
+                  }).toList();
+
+                  // Layout calculations for responsive grid
+                  final double screenWidth = MediaQuery.of(context).size.width;
+                  // Sidebar width = 260. Body horizontal padding = 24 * 2 = 48.
+                  final double contentWidth = (screenWidth - 260 - 48).clamp(320.0, 9999.0);
+                  
+                  final int crossAxisCount = contentWidth > 1100
+                      ? 3
+                      : (contentWidth > 700 ? 2 : 1);
+                  
+                  final double gridItemWidth = (contentWidth - (crossAxisCount - 1) * 16) / crossAxisCount;
+                  // Card content size is roughly 250px high
+                  const double approxCardHeight = 240.0;
+                  final double gridAspectRatio = gridItemWidth / approxCardHeight;
+
+                  return SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.only(bottom: 40.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // Custom App Bar (matching Dashboard/Homepage style)
+                        Container(
+                          height: 75,
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          decoration: const BoxDecoration(
+                            color: Colors.white,
+                            border: Border(
+                              bottom: BorderSide(color: Color(0xFFE2E8F0)),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Good Morning, Team BOI',
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Container(
+                                        width: 8,
+                                        height: 8,
+                                        decoration: const BoxDecoration(
+                                          color: Color(0xFF22C55E),
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      const Text(
+                                        'System Active',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: Color(0xFF64748B),
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              Row(
+                                children: [
+                                  // Rounded Search Bar
+                                  Container(
+                                    width: contentWidth > 800 ? 280.0 : 180.0,
+                                    height: 40,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF1F5F9),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: TextField(
+                                      controller: _searchCtrl,
+                                      onChanged: (val) {
+                                        setState(() {
+                                          _searchQuery = val;
+                                        });
+                                      },
+                                      decoration: const InputDecoration(
+                                        hintText: 'Search suspicious patterns...',
+                                        hintStyle: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+                                        prefixIcon: Icon(Icons.search, color: Color(0xFF94A3B8), size: 18),
+                                        border: InputBorder.none,
+                                        contentPadding: EdgeInsets.symmetric(vertical: 11),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  // Notification Bell
+                                  Container(
+                                    decoration: const BoxDecoration(
+                                      color: Colors.white,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: IconButton(
+                                      icon: const Icon(Icons.notifications_outlined, color: Color(0xFF64748B)),
+                                      onPressed: () {},
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // Settings Gear
+                                  Container(
+                                    decoration: const BoxDecoration(
+                                      color: Colors.white,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: IconButton(
+                                      icon: const Icon(Icons.settings_outlined, color: Color(0xFF64748B)),
+                                      onPressed: () {},
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  // Investigator profile info
+                                  Row(
+                                    children: const [
+                                      CircleAvatar(
+                                        radius: 18,
+                                        backgroundColor: Color(0xFF0F172A),
+                                        child: Text(
+                                          'NV',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                      SizedBox(width: 10),
+                                      Text(
+                                        'Investigator Neil Verma',
+                                        style: TextStyle(
+                                          color: Color(0xFF334155),
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Section Heading + Refresh Row
                         Padding(
-                          padding: const EdgeInsets.only(
-                            left: 50.0,
-                            top: 15,
+                          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: const [
+                                  Text(
+                                    'Real-time Alert Center',
+                                    style: TextStyle(
+                                      color: text,
+                                      fontSize: 32,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  SizedBox(height: 6),
+                                  Text(
+                                    'Monitoring active transaction patterns',
+                                    style: TextStyle(
+                                      color: Color(0xFF64748B),
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w400,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF0F172A),
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                ),
+                                onPressed: () {
+                                  // Refresh stream trigger or visual feedback
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Checking live alert updates...'),
+                                      duration: Duration(seconds: 1),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.refresh, color: Colors.white, size: 18),
+                                label: const Text(
+                                  'Live Refresh',
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
                           ),
-                          child: Text(
-                            'Good Morning, Team BOI',
-                            style: TextStyle(
-                              color: Colors.blue,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18,
+                        ),
+
+                        // Top KPI Cards Row
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: RealTimeCard(
+                                  text: 'Critical Alerts',
+                                  number: criticalAlertsCount.toString(),
+                                  icon: Icons.error_outline_rounded,
+                                  icon_color: const Color(0xFFEF4444),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: RealTimeCard(
+                                  text: 'Active In-Progress',
+                                  number: inProgressCount.toString(),
+                                  icon: Icons.trending_up_rounded,
+                                  icon_color: const Color(0xFFF59E0B),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: RealTimeCard(
+                                  text: 'Escalated Priority',
+                                  number: escalatedCount.toString(),
+                                  icon: Icons.shield_outlined,
+                                  icon_color: const Color(0xFF3B82F6),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 32),
+
+                        // Live Investigation Feed Header
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: const [
+                              Text(
+                                'Live Investigation Feed',
+                                style: TextStyle(
+                                  color: text,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 24,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Grid of Alerts
+                        if (filteredAlerts.isEmpty)
+                          Center(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 80),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: const [
+                                  Icon(Icons.shield_outlined, color: Colors.green, size: 64),
+                                  SizedBox(height: 16),
+                                  Text(
+                                    'No Active Alerts Found',
+                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+                                  ),
+                                  SizedBox(height: 8),
+                                  Text(
+                                    'No alerts match the current query.',
+                                    style: TextStyle(fontSize: 14, color: Colors.black54),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ), // ye change hogay ky according to date?
-                        ),
-                        Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 5,
-                              backgroundColor: Colors.greenAccent,
+                          )
+                        else
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                            child: GridView.builder(
+                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: crossAxisCount,
+                                childAspectRatio: gridAspectRatio,
+                                crossAxisSpacing: 16,
+                                mainAxisSpacing: 16,
+                              ),
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              padding: const EdgeInsets.all(8),
+                              itemCount: filteredAlerts.length,
+                              itemBuilder: (context, index) {
+                                final alertEntry = filteredAlerts[index];
+                                final txnId = alertEntry.key;
+                                final alertData = alertEntry.value;
+                                final txnData = txnMap[txnId] ?? {};
+
+                                final String riskTier = (alertData['riskTier'] ?? 'HIGH').toString();
+                                final double probability = (alertData['probability'] as num?)?.toDouble() ?? 0.8;
+                                final String scoreStr = (probability * 100).round().toString();
+
+                                final String accountFrom = txnData['accountFrom']?.toString() ?? 'unknown';
+                                final String formattedAcc = accountFrom.length > 8
+                                    ? '${accountFrom.substring(0, 4)}XXXX${accountFrom.substring(accountFrom.length - 4)}'
+                                    : accountFrom;
+
+                                final String duration = _getDuration(txnData['createdAt']);
+
+                                // Location details
+                                final loc = txnData['location'] is Map
+                                    ? Map<String, dynamic>.from(txnData['location'] as Map)
+                                    : null;
+                                final String city = loc?['city']?.toString() ?? 'Mumbai';
+                                final String country = loc?['country']?.toString() ?? 'IN';
+                                final String locationStr = '$city, $country';
+
+                                final List<dynamic> signals = alertData['signals'] is List
+                                    ? alertData['signals'] as List
+                                    : [];
+                                final String summary = signals.isNotEmpty
+                                    ? 'Flagged due to: ${signals.join(", ")}'
+                                    : 'AI model flagged this transaction as a high-risk transfer.';
+
+                                Color boxColor = const Color(0xFFEF4444);
+                                String ctgy = 'High';
+                                if (riskTier.toUpperCase() == 'CRITICAL') {
+                                  boxColor = const Color(0xFF991B1B);
+                                  ctgy = 'Critical';
+                                } else if (riskTier.toUpperCase() == 'MEDIUM') {
+                                  boxColor = const Color(0xFFF59E0B);
+                                  ctgy = 'Medium';
+                                } else if (riskTier.toUpperCase() == 'LOW') {
+                                  boxColor = const Color(0xFF3B82F6);
+                                  ctgy = 'Low';
+                                }
+
+                                return GestureDetector(
+                                  onTap: () {
+                                    if (widget.onViewTxn != null) {
+                                      widget.onViewTxn!(txnId);
+                                    } else {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => AlertInfo(txnId: txnId),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  child: AiSumCard(
+                                    box_color: boxColor,
+                                    ctgy: ctgy,
+                                    Score: scoreStr,
+                                    acc_no: formattedAcc,
+                                    duration: duration,
+                                    location: locationStr,
+                                    summary: summary,
+                                  ),
+                                );
+                              },
                             ),
-                            Text('System Active'),
-                          ],
-                        ),
-                      ],
-                    ),
-                    Container(
-                      width: MediaQuery.of(context).size.width * 0.3,
-                      child: TextFormField(
-                        decoration: InputDecoration(
-                          labelText: "Search for mule accounts",
-                          labelStyle: TextStyle(color: Colors.black),
-                          icon: Icon(Icons.search),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(100),
-                            borderSide: BorderSide(color: Color(0xFFcacfd6)),
                           ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(100),
-                            borderSide: BorderSide(color: Colors.blue),
-                          ),
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: () {},
-                      icon: Icon(Icons.notifications_active_outlined),
-                    ),
-
-                    IconButton(
-                      onPressed: () {},
-                      icon: Icon(Icons.settings_outlined),
-                    ),
-                    VerticalDivider(width: 0.2, color: Color(0xFFcacfd6)),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        CircleAvatar(
-                          backgroundColor: Colors.black,
-                          radius: 15,
-                        ),
-                        SizedBox(width: 10),
-
-                        Text('Investigator Neil verma'),
                       ],
                     ),
-                  ],
-                ),
-              ),
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text(
-                        'Real-time Alert Center',
-                        style: TextStyle(
-                          color: text,
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    SizedBox(height: 10),
-                    Text(
-                      'Monitoring active transaction patters',
-                      style: TextStyle(
-                        color: text,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w300,
-                      ),
-                    ),
-                  ],
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Color(0xFF011d35),
-                    ),
-                    onPressed: () {},
-                    child: Row(
-                      children: [
-                        Icon(Icons.refresh, color: Colors.white),
-        
-                        Text(
-                          'Live Refresh',
-                          style: TextStyle(color: Colors.white),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                //wase to yaha pr bhi custom card ki zarurt nhi thi but de diye
-                RealTimeCard(
-                  text: 'Critical Alerts',
-                  number: '12',
-                  icon: Icons.not_interested_outlined,
-                  icon_color: Colors.red,
-                ),
-                RealTimeCard(
-                  text: 'Active In- Progress',
-                  number: '84',
-                  icon: Icons.auto_graph,
-                  icon_color: Colors.orangeAccent,
-                ),
-                RealTimeCard(
-                  text: 'Escalated Priority',
-                  number: '5',
-                  icon: Icons.shield_moon_outlined,
-                  icon_color: Colors.lightBlueAccent,
-                ),
-              ],
-            ),
-            SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Text(
-                    "Live Investigation Feed",
-                    style: TextStyle(
-                      color: Colors.black,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 32,
-                    ),
-                  ),
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    //iska kud se kr lena mere ko smja nhi wase bhi puri value di nhi thi tune :)
-                    DropdownButton(items: [
-        
-                    ], onChanged: null),
-                    DropdownButton(items: [
-        
-                    ], onChanged: null)
-                  ],
-                )
-              ],
-            ),
-            SizedBox(height: 10,),
-            GridView(gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.1),
-            shrinkWrap: true,
-            physics: NeverScrollableScrollPhysics(),
-            padding: EdgeInsets.all(16),
-
-            children: [
-              GestureDetector(
-                onTap: (){
-                  Navigator.push(context, MaterialPageRoute(builder: ((context) => AlertInfo())));
+                  );
                 },
-                  child: AiSumCard(box_color: Colors.red, ctgy: 'High', Score: '98', acc_no: '7293XXXX0373', duration: '2min ago', location: 'Mumbai IN', summary: 'losem zomen bursom horsesemne')),
-              AiSumCard(box_color: Colors.blue, ctgy: 'Low', Score: '34', acc_no: '83782XXX9433', duration: '3min ago', location: 'Delhi IN', summary: 'losem zomen bursom horsesemne'),
-              AiSumCard(box_color: Colors.orangeAccent, ctgy: 'Med', Score: '45', acc_no: '7663XXXX0274', duration: '2hrs ago', location: 'Lahore PK', summary: 'losem zomen bursom horsesemne'),
-              AiSumCard(box_color: Colors.red, ctgy: 'High', Score: '98', acc_no: '1393XXXX4593', duration: '5hrs ago', location: 'Texas US', summary: 'losem zomen bursom horsesemne'),
-
-            ],)
-          ],
-        ),
+              );
+            },
+          );
+        },
       ),
     );
   }

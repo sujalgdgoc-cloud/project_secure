@@ -22,168 +22,143 @@ class AiSumCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: Card(
-        elevation: 4,
+    return Container(
+      decoration: BoxDecoration(
         color: Colors.white,
-        child: Container(
-          height: MediaQuery.of(context).size.height * 0.05,
-          width: MediaQuery.of(context).size.width * 0.3,
-          decoration: BoxDecoration(
-            color: Colors.white70,
-            borderRadius: BorderRadius.circular(21),
-            border: Border(top: BorderSide(color: box_color, width: 3)),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x050F172A),
+            blurRadius: 6,
+            offset: Offset(0, 3),
           ),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Top Accent Color Line (4px height)
+            Container(
+              height: 4,
+              width: double.infinity,
+              color: box_color,
+            ),
+            Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Container(decoration: BoxDecoration(
-                      color: box_color.withValues(alpha: 90),
-                      borderRadius: BorderRadius.circular(11)
-                    ),
-                      height: 50,
-                      width: 50,
-
-                      child: Center(child: Text(ctgy)),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Container(
-                      height: 50,
-                      width: 80,
-                      decoration: BoxDecoration(
-                        color: box_color.withValues(alpha: 80),
-                        borderRadius: BorderRadius.circular(100),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [Text(Score), Text('Score')],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 6),
-              Column(
-                children: [
+                  // Badges Row
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Text('ACC:'),
+                      // Risk Category Badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: box_color.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(100),
+                        ),
+                        child: Text(
+                          ctgy,
+                          style: TextStyle(
+                            color: box_color,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
                       ),
-
-                      Text(
-                        acc_no,
-                        style: TextStyle(
-                          color: Colors.black,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 21,
+                      // Score Badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: box_color,
+                          borderRadius: BorderRadius.circular(100),
+                        ),
+                        child: Text(
+                          '${Score}Score',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
                         ),
                       ),
                     ],
                   ),
+                  const SizedBox(height: 16),
+                  
+                  // Account Details
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.start,
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Icon(Icons.alarm_outlined),
+                      const Text(
+                        'ACC: ',
+                        style: TextStyle(
+                          color: Color(0xFF64748B),
+                          fontWeight: FontWeight.w500,
+                          fontSize: 15,
+                        ),
                       ),
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Text(duration),
-                      ),
-                      Text('•'),
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Text(location),
+                      Text(
+                        acc_no,
+                        style: const TextStyle(
+                          color: Color(0xFF0F172A),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
                       ),
                     ],
                   ),
-                ],
-              ),
-              SizedBox(height: 5),
-              Padding(
-                padding: const EdgeInsets.all(5.0),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(11),
-                    color: Colors.black12,
-                  ),
-                  height: MediaQuery.of(context).size.height * 0.3,
-                  width: MediaQuery.of(context).size.width * 0.3,
-                  child: Center(child: Text(summary)),
-                ),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: FilledButton.icon(
-                        onPressed: () {},
-                        style: FilledButton.styleFrom(backgroundColor: Colors.lightBlueAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11))),
-                        label: Text('Review'),
-                        icon:Icon( Icons.search),
+                  const SizedBox(height: 8),
 
+                  // Duration & Location Row
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.access_time_rounded,
+                        size: 15,
+                        color: Color(0xFF94A3B8),
                       ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: FilledButton.icon(
-                        onPressed: () {},
-                        style: FilledButton.styleFrom(backgroundColor: Colors.redAccent, shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(11))),
-                        label: Text('Freeze'),
-                        icon:Icon( Icons.severe_cold),
-
+                      const SizedBox(width: 6),
+                      Text(
+                        '$duration  •  $location',
+                        style: const TextStyle(
+                          color: Color(0xFF64748B),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w400,
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
-              SizedBox(height: 5,),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: OutlinedButton.icon(
-                        onPressed: () {},
-                        style: FilledButton.styleFrom(backgroundColor: Colors.white, shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(11))),
-                        label: Text('Escalate', style: TextStyle(color: Colors.black),),
-                        icon:Icon( Icons.noise_aware, color: Colors.black,),
+                  const SizedBox(height: 16),
 
-                      ),
+                  // Flagged summary container
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFF1F5F9)),
                     ),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: OutlinedButton.icon(
-                        onPressed: () {},
-                        style: FilledButton.styleFrom(backgroundColor: Colors.white, shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(11))),
-                        label: Text('Dismiss', style: TextStyle(color: Colors.black),),
-                        icon:Icon( Icons.not_interested, color: Colors.black,),
-
+                    child: Text(
+                      summary,
+                      style: const TextStyle(
+                        color: Color(0xFF334155),
+                        fontSize: 13,
+                        height: 1.4,
+                        fontWeight: FontWeight.w400,
                       ),
                     ),
                   ),
                 ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
