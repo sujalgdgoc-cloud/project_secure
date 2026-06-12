@@ -4,6 +4,7 @@ import 'package:project_secure/screens/alertScreen.dart';
 import 'package:project_secure/screens/homepage.dart';
 import 'package:project_secure/screens/transcationScreen.dart';
 import 'package:project_secure/screens/alertinfoScreen.dart';
+import 'package:project_secure/screens/muleAccountScreen.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:project_secure/services/db_service.dart';
 
@@ -28,19 +29,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
   List<Widget> get _pages => [
     Homepage(
-      onViewAll: () => setState(() {
-        _currentIndex = 2;
-        _selectedTxnId = null;
-      }),
+      onViewAll: () => setState(() { _currentIndex = 2; _selectedTxnId = null; }),
       onViewTxn: (txnId) => setState(() => _selectedTxnId = txnId),
     ),
-    AlertScreen(
-      onViewTxn: (txnId) => setState(() => _selectedTxnId = txnId),
-    ),
-    TranscationScreen(
-      onViewTxn: (txnId) => setState(() => _selectedTxnId = txnId),
-    ),
+    AlertScreen(onViewTxn: (txnId) => setState(() => _selectedTxnId = txnId)),
+    TranscationScreen(onViewTxn: (txnId) => setState(() => _selectedTxnId = txnId)),
     const AiModelScreen(),
+    MuleAccountScreen(onViewTxn: (txnId) => setState(() => _selectedTxnId = txnId)),
   ];
 
   @override
@@ -101,6 +96,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       _buildMenuItem(1, Icons.crisis_alert_sharp, 'Alerts', showBadge: true),
                       _buildMenuItem(2, Icons.receipt_long_rounded, 'Transactions'),
                       _buildMenuItem(3, Icons.model_training_rounded, 'AI Model'),
+                      _buildMenuItem(4, Icons.manage_accounts_rounded, 'Mule Accounts'),
                     ],
                   ),
                 ),

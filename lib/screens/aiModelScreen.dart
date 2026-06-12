@@ -43,9 +43,11 @@ class AiModelScreen extends StatefulWidget {
 
 class _AiModelScreenState extends State<AiModelScreen> {
   // Account fields
-  final _accountFromCtrl = TextEditingController();
-  final _accountToCtrl = TextEditingController();
-  final _amountCtrl = TextEditingController(text: '10000');
+  final _accountFromCtrl  = TextEditingController();
+  final _accountToCtrl    = TextEditingController();
+  final _amountCtrl       = TextEditingController(text: '10000');
+  final _senderNameCtrl   = TextEditingController();
+  final _receiverNameCtrl = TextEditingController();
 
   // Feature controllers
   late final List<TextEditingController> _ctrls = _features
@@ -64,6 +66,8 @@ class _AiModelScreenState extends State<AiModelScreen> {
     _accountFromCtrl.dispose();
     _accountToCtrl.dispose();
     _amountCtrl.dispose();
+    _senderNameCtrl.dispose();
+    _receiverNameCtrl.dispose();
     for (final c in _ctrls) { c.dispose(); }
     _activeTxnSub?.cancel();
     super.dispose();
@@ -82,19 +86,37 @@ class _AiModelScreenState extends State<AiModelScreen> {
 
   String get _prettyPayload =>
       const JsonEncoder.withIndent('  ').convert({
-        'accountFrom': _accountFromCtrl.text.trim(),
-        'accountTo': _accountToCtrl.text.trim(),
-        'features': _featuresMap,
+        'accountFrom':  _accountFromCtrl.text.trim(),
+        'accountTo':    _accountToCtrl.text.trim(),
+        'senderName':   _senderNameCtrl.text.trim(),
+        'receiverName': _receiverNameCtrl.text.trim(),
+        'features':     _featuresMap,
       });
 
   Future<void> _submitToFirebase() async {
-    final from = _accountFromCtrl.text.trim();
-    final to   = _accountToCtrl.text.trim();
-    final amount = double.tryParse(_amountCtrl.text.trim()) ?? 10000.0;
+    final from         = _accountFromCtrl.text.trim();
+    final to           = _accountToCtrl.text.trim();
+    final senderName   = _senderNameCtrl.text.trim();
+    final receiverName = _receiverNameCtrl.text.trim();
+    final amount       = double.tryParse(_amountCtrl.text.trim()) ?? 10000.0;
 
     if (from.isEmpty || to.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Please fill Account From and Account To'),
+        backgroundColor: Colors.red,
+      ));
+      return;
+    }
+    if (senderName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Please fill the Sender Full Name'),
+        backgroundColor: Colors.red,
+      ));
+      return;
+    }
+    if (receiverName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Please fill the Receiver Full Name'),
         backgroundColor: Colors.red,
       ));
       return;
@@ -124,16 +146,24 @@ class _AiModelScreenState extends State<AiModelScreen> {
 
       // ── STEP 1: Write transaction node with location ─────────────
       final txnId = await DbService.writeTxn(
-        accountFrom: from,
-        accountTo: to,
-        amount: amount,
-        location: location,
+        accountFrom:  from,
+        accountTo:    to,
+        amount:       amount,
+        location:     location,
+        senderName:   senderName,
+        receiverName: receiverName,
       );
 
       // ── STEP 2: Write boolean account references + summary ───────
       await DbService.writeAccRefs(
-        from: from, to: to, txnId: txnId,
-        amount: amount, isMule: false);
+        from:         from,
+        to:           to,
+        txnId:        txnId,
+        amount:       amount,
+        isMule:       false,
+        senderName:   senderName,
+        receiverName: receiverName,
+      );
 
       // ── STEP 3: Listen to this transaction for status updates ───
       await _activeTxnSub?.cancel();
@@ -263,6 +293,8 @@ class _AiModelScreenState extends State<AiModelScreen> {
     _accountFromCtrl.clear();
     _accountToCtrl.clear();
     _amountCtrl.text = '10000';
+    _senderNameCtrl.clear();
+    _receiverNameCtrl.clear();
     for (var i = 0; i < _features.length; i++) {
       _ctrls[i].text = _features[i].defaultValue.toString();
     }
@@ -496,6 +528,25 @@ class _AiModelScreenState extends State<AiModelScreen> {
                                         icon: Icons.currency_rupee,
                                       )),
                                     ]),
+                                    const SizedBox(height: 12),
+                                    Row(children: [
+                                      Expanded(child: _accountField(
+                                        controller: _senderNameCtrl,
+                                        label: 'Sender Full Name *',
+                                        hint: 'e.g. Rahul Sharma',
+                                        icon: Icons.person_outline,
+                                      )),
+                                      const SizedBox(width: 12),
+                                      Expanded(child: _accountField(
+                                        controller: _receiverNameCtrl,
+                                        label: 'Receiver Full Name *',
+                                        hint: 'e.g. Priya Singh',
+                                        icon: Icons.person_pin_outlined,
+                                      )),
+                                      const SizedBox(width: 12),
+                                      // Spacer to align with 3-column layout above
+                                      const Expanded(child: SizedBox()),
+                                    ]),
                                     const SizedBox(height: 16),
                                     const Divider(),
                                     const SizedBox(height: 8),
@@ -573,7 +624,7 @@ class _AiModelScreenState extends State<AiModelScreen> {
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: AnimatedBuilder(
-                                      animation: Listenable.merge([_accountFromCtrl, _accountToCtrl, ..._ctrls]),
+                                      animation: Listenable.merge([_accountFromCtrl, _accountToCtrl, _senderNameCtrl, _receiverNameCtrl, ..._ctrls]),
                                       builder: (_, __) => SingleChildScrollView(
                                         child: SelectableText(
                                           _prettyPayload,

@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:firebase_database/firebase_database.dart';
 import 'package:project_secure/services/db_service.dart';
-import 'package:project_secure/services/ai_model_service.dart';
 
 class AlertInfo extends StatefulWidget {
   final String? txnId;
@@ -99,15 +97,41 @@ class _AlertInfoState extends State<AlertInfo> {
 
   // Action helpers
   Future<void> _freezeAccount(String accountId) async {
+    if (_activeTxnId == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Freeze Account'),
+        content: Text(
+          'Are you sure you want to freeze account ending ...${accountId.length > 4 ? accountId.substring(accountId.length - 4) : accountId}?\n\nThis action will be logged and requires supervisor approval to reverse.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Freeze'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
     try {
-      await DbService.accounts.child('$accountId/summary').update({
-        'status': 'frozen',
-        'flaggedCount': ServerValue.increment(1),
-      });
+      await DbService.freezeAccount(
+        accountId:   accountId,
+        alertId:     _activeTxnId!,
+        performedBy: 'Investigator Neil Verma',
+        reason:      'High-probability mule transaction flagged by AI Sentinel',
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Account $accountId has been frozen.'),
-          backgroundColor: Colors.redAccent,
+          content: Row(children: const [
+            Icon(Icons.block, color: Colors.white, size: 18),
+            SizedBox(width: 10),
+            Expanded(child: Text('Account has been frozen. Action logged.')),
+          ]),
+          backgroundColor: const Color(0xFFDC2626),
+          duration: const Duration(seconds: 3),
         ));
       }
     } catch (e) {
@@ -120,40 +144,29 @@ class _AlertInfoState extends State<AlertInfo> {
     }
   }
 
-  Future<void> _holdTransaction() async {
-    if (_activeTxnId == null) return;
-    try {
-      await DbService.markTxnStatus(_activeTxnId!, 'held');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Transaction placed on hold.'),
-          backgroundColor: Colors.orangeAccent,
-        ));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Error holding transaction: $e'),
-          backgroundColor: Colors.red,
-        ));
-      }
-    }
-  }
-
   Future<void> _escalateTransaction() async {
     if (_activeTxnId == null) return;
     try {
-      await DbService.markTxnStatus(_activeTxnId!, 'escalated');
+      await DbService.escalateAlert(
+        txnId:       _activeTxnId!,
+        escalatedBy: 'Investigator Neil Verma',
+        reason:      'Manually escalated via Alert Details — requires senior review',
+      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Alert escalated to senior queue.'),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Row(children: const [
+            Icon(Icons.crisis_alert, color: Colors.white, size: 18),
+            SizedBox(width: 10),
+            Expanded(child: Text('Alert escalated to senior investigator queue.')),
+          ]),
           backgroundColor: Colors.blueAccent,
+          duration: const Duration(seconds: 3),
         ));
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Error escalating transaction: $e'),
+          content: Text('Error escalating alert: $e'),
           backgroundColor: Colors.red,
         ));
       }
@@ -163,14 +176,23 @@ class _AlertInfoState extends State<AlertInfo> {
   Future<void> _markSafe() async {
     if (_activeTxnId == null) return;
     try {
-      await DbService.markTxnStatus(_activeTxnId!, 'safe');
-      // Also remove alert
-      await DbService.alerts.child(_activeTxnId!).remove();
+      await DbService.markSafe(
+        txnId:      _activeTxnId!,
+        reviewedBy: 'Investigator Neil Verma',
+        note:       'Investigation completed — transaction deemed safe after manual review',
+      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Transaction marked safe. Alert cleared.'),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Row(children: const [
+            Icon(Icons.check_circle, color: Colors.white, size: 18),
+            SizedBox(width: 10),
+            Expanded(child: Text('Transaction marked safe. Alert cleared.')),
+          ]),
           backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
         ));
+        await Future.delayed(const Duration(seconds: 2));
+        if (!mounted) return;
         if (widget.onBack != null) {
           widget.onBack!();
         } else {
@@ -238,13 +260,11 @@ class _AlertInfoState extends State<AlertInfo> {
     final loc = _txnData!['location'] is Map ? Map<String, dynamic>.from(_txnData!['location'] as Map) : null;
     final String city = loc?['city']?.toString() ?? 'Worli';
     final String state = loc?['state']?.toString() ?? 'Mumbai';
-    final String country = loc?['country']?.toString() ?? 'IN';
     final String ip = loc?['ip']?.toString() ?? '192.168.1.45';
 
     final double amountVal = (_txnData!['amount'] as num?)?.toDouble() ?? 0.0;
     final String accountFrom = _txnData!['accountFrom']?.toString() ?? 'ACC001';
     final String accountTo = _txnData!['accountTo']?.toString() ?? 'ACC002';
-    final String status = _txnData!['status']?.toString() ?? 'pending';
 
     // Parse prediction details
     final double probability = (_predData?['probability'] as num?)?.toDouble() ?? 0.87;
@@ -260,12 +280,6 @@ class _AlertInfoState extends State<AlertInfo> {
     const String processingTime = '12ms';
     const String dataPoints = '1,402';
 
-    // Colors
-    final Color primaryColor = const Color(0xFF0074bd);
-    final Color alertRed = const Color(0xFFDC2626);
-    final Color statusColor = status == 'safe'
-        ? Colors.green
-        : (status == 'held' ? Colors.orange : alertRed);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF1F5F9),
@@ -539,8 +553,24 @@ class _AlertInfoState extends State<AlertInfo> {
     );
   }
 
-  // Left card 2: Entities
+  // Left card 2: Entities — names read from Firebase transaction data
   Widget _buildEntitiesCard(String from, String to, String fromLast4, String toLast4) {
+    final String senderName   = (_txnData?['senderName']   as String?)?.trim() ?? '';
+    final String receiverName = (_txnData?['receiverName'] as String?)?.trim() ?? '';
+
+    final String senderDisplay   = senderName.isNotEmpty   ? senderName   : 'A/C ...$fromLast4';
+    final String receiverDisplay = receiverName.isNotEmpty ? receiverName : 'A/C ...$toLast4';
+
+    String deriveInitials(String name, String fallback) {
+      if (name.isEmpty) return fallback.substring(0, fallback.length.clamp(0, 2)).toUpperCase();
+      final parts = name.trim().split(RegExp(r'\s+'));
+      if (parts.length >= 2) return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+      return name.substring(0, name.length.clamp(0, 2)).toUpperCase();
+    }
+
+    final String senderInitials   = deriveInitials(senderName, fromLast4);
+    final String receiverInitials = deriveInitials(receiverName, toLast4);
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -562,15 +592,21 @@ class _AlertInfoState extends State<AlertInfo> {
               CircleAvatar(
                 backgroundColor: const Color(0xFFEFF6FF),
                 radius: 20,
-                child: const Text('RK', style: TextStyle(color: Color(0xFF1D4ED8), fontWeight: FontWeight.bold)),
+                child: Text(senderInitials, style: const TextStyle(color: Color(0xFF1D4ED8), fontWeight: FontWeight.bold)),
               ),
               const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Rajesh Kumar', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                  Text('Sender • A/C ...$fromLast4', style: const TextStyle(fontSize: 13, color: Color(0xFF64748B))),
-                ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      senderDisplay,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text('Sender  •  A/C ...$fromLast4', style: const TextStyle(fontSize: 13, color: Color(0xFF64748B))),
+                  ],
+                ),
               ),
             ],
           ),
@@ -584,17 +620,22 @@ class _AlertInfoState extends State<AlertInfo> {
               CircleAvatar(
                 backgroundColor: const Color(0xFFFEF2F2),
                 radius: 20,
-                child: const Text('AM', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold)),
+                child: Text(receiverInitials, style: const TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold)),
               ),
               const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Anjali Mehta', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFFDC2626))),
-                  Text('Receiver • A/C ...$toLast4', style: const TextStyle(fontSize: 13, color: Color(0xFF64748B))),
-                ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      receiverDisplay,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text('Receiver  •  A/C ...$toLast4', style: const TextStyle(fontSize: 13, color: Color(0xFF64748B))),
+                  ],
+                ),
               ),
-              const Spacer(),
               const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626), size: 20),
             ],
           ),
@@ -902,7 +943,7 @@ class _AlertInfoState extends State<AlertInfo> {
     );
   }
 
-  // Bottom action buttons
+  // Bottom action buttons — Hold Transaction removed, 3 buttons fill the row evenly
   Widget _buildActionButtonsRow(String accountFrom, String accountTo) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -917,22 +958,6 @@ class _AlertInfoState extends State<AlertInfo> {
                 label: const Text('Freeze Account', style: TextStyle(fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFDC2626),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: SizedBox(
-              height: 48,
-              child: ElevatedButton.icon(
-                onPressed: _holdTransaction,
-                icon: const Icon(Icons.pause, size: 18),
-                label: const Text('Hold Transaction', style: TextStyle(fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFB45309),
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),

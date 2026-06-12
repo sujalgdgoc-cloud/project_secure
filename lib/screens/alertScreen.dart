@@ -138,11 +138,6 @@ class _AlertScreenState extends State<AlertScreen> {
                   final int crossAxisCount = contentWidth > 1100
                       ? 3
                       : (contentWidth > 700 ? 2 : 1);
-                  
-                  final double gridItemWidth = (contentWidth - (crossAxisCount - 1) * 16) / crossAxisCount;
-                  // Card content size is roughly 250px high
-                  const double approxCardHeight = 240.0;
-                  final double gridAspectRatio = gridItemWidth / approxCardHeight;
 
                   return SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
@@ -422,7 +417,7 @@ class _AlertScreenState extends State<AlertScreen> {
                             child: GridView.builder(
                               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                                 crossAxisCount: crossAxisCount,
-                                childAspectRatio: gridAspectRatio,
+                                mainAxisExtent: 460,
                                 crossAxisSpacing: 16,
                                 mainAxisSpacing: 16,
                               ),
@@ -474,29 +469,67 @@ class _AlertScreenState extends State<AlertScreen> {
                                   boxColor = const Color(0xFF3B82F6);
                                   ctgy = 'Low';
                                 }
+                                final String accountTo = txnData['accountTo']?.toString() ?? '';
 
-                                return GestureDetector(
-                                  onTap: () {
+                                return AiSumCard(
+                                  box_color: boxColor,
+                                  ctgy: ctgy,
+                                  Score: scoreStr,
+                                  acc_no: formattedAcc,
+                                  duration: duration,
+                                  location: locationStr,
+                                  summary: summary,
+                                  txnId: txnId,
+                                  accountTo: accountTo,
+                                  onReview: () async {
                                     if (widget.onViewTxn != null) {
                                       widget.onViewTxn!(txnId);
                                     } else {
                                       Navigator.push(
                                         context,
-                                        MaterialPageRoute(
-                                          builder: (context) => AlertInfo(txnId: txnId),
-                                        ),
+                                        MaterialPageRoute(builder: (context) => AlertInfo(txnId: txnId)),
                                       );
                                     }
                                   },
-                                  child: AiSumCard(
-                                    box_color: boxColor,
-                                    ctgy: ctgy,
-                                    Score: scoreStr,
-                                    acc_no: formattedAcc,
-                                    duration: duration,
-                                    location: locationStr,
-                                    summary: summary,
-                                  ),
+                                  onFreeze: () async {
+                                    await DbService.freezeAccount(
+                                      accountId:   accountTo,
+                                      alertId:     txnId,
+                                      performedBy: 'Investigator Neil Verma',
+                                      reason:      'High-probability mule — flagged via Alert Card',
+                                    );
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                        content: Text('Account frozen. Action logged.'),
+                                        backgroundColor: Color(0xFFDC2626),
+                                        duration: Duration(seconds: 2),
+                                      ));
+                                    }
+                                  },
+                                  onEscalate: () async {
+                                    await DbService.escalateAlert(
+                                      txnId:       txnId,
+                                      escalatedBy: 'Investigator Neil Verma',
+                                    );
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                        content: Text('Alert escalated to senior queue.'),
+                                        backgroundColor: Colors.blueAccent,
+                                        duration: Duration(seconds: 2),
+                                      ));
+                                    }
+                                  },
+                                  onDismiss: () async {
+                                    await DbService.alerts.child(txnId).remove();
+                                    await DbService.markTxnStatus(txnId, 'dismissed');
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                        content: Text('Alert dismissed.'),
+                                        backgroundColor: Color(0xFF64748B),
+                                        duration: Duration(seconds: 2),
+                                      ));
+                                    }
+                                  },
                                 );
                               },
                             ),
